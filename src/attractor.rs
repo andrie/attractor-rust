@@ -23,6 +23,7 @@ use image::{RgbaImage, ImageBuffer};
 
 
 /// Holds attractor results.
+/// 
 pub struct AttractorResult {
     /// filename
     pub filename: String,
@@ -33,6 +34,7 @@ pub struct AttractorResult {
 }
 
 /// Attractor input configuration
+/// 
 pub struct AttractorInput {
     /// coefficient array
     pub a: Array1<f64>,
@@ -49,6 +51,8 @@ pub struct AttractorInput {
 }
 
 
+/// Scales (interpolates) value and maps onto a different output range
+/// 
 fn remap(x:&f64, xmin:&f64, xmax:&f64, ymin:&f64, ymax:&f64) -> f64 {
     if xmin == xmax { return 0.5; }
     return ymin + (x - xmin) * (ymax - ymin) / (xmax - xmin);
@@ -68,7 +72,6 @@ fn remap(x:&f64, xmin:&f64, xmax:&f64, ymin:&f64, ymax:&f64) -> f64 {
 /// Julien C. Sprott, "Strange Attractors: Creating Patterns in Chaos", page 418, Equation 7e, 
 /// <https://sprott.physics.wisc.edu/fractals/booktext/sabook.pdf>
 ///
-
 fn sprott_7e(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
     let a1  = a[0];
     let a2  = a[1];
@@ -113,26 +116,32 @@ pub fn attractor(config: &AttractorInput) -> AttractorResult {
     
     // compute a burn-in of 1000 samples and discard
     let mut finite = true;
-    for _i in 1..1000 {
-        (x1, y1) = sprott_7e(&a, &x1, &y1);
-        if x1.is_infinite() || y1.is_infinite() {
-            nn = _i;
-            finite = false;
-            break;      
-        }
-    }
-
-    // compute nn new samples
-    let mut i:usize = 0;
-    while finite && i < n {
+    for i in 1..1000 {
         (x1, y1) = sprott_7e(&a, &x1, &y1);
         if x1.is_infinite() || y1.is_infinite() {
             nn = i;
             finite = false;
             break;      
         }
+    }
+
+    if !finite {
+        return AttractorResult{filename: String::from(""), n: nn, finite: false};
+    }
+
+    // compute nn new samples
+    for i in 1..n {
+        (x1, y1) = sprott_7e(&a, &x1, &y1);
+        if x1.is_infinite() || y1.is_infinite() {
+            finite = false;
+            nn = i;
+            break;      
+        }
         xy.push((x1, y1));
-        i += 1;
+    }
+
+    if !finite {
+        return AttractorResult{filename: String::from(""), n: nn, finite: false};
     }
 
     // compute percentiles
@@ -142,10 +151,7 @@ pub fn attractor(config: &AttractorInput) -> AttractorResult {
 
     // discretize into image
     let mut image: Array2<i32> = Array2::zeros(img_size);
-    if finite {
-        nn = n;
-        image = discretize_image(&xy, img_size, xrange, yrange, image);
-    }
+    image = discretize_image(&xy, img_size, xrange, yrange, image);
 
     // convert array to image with colour gradient
     let imgbuf:RgbaImage = convert_to_image(image);
