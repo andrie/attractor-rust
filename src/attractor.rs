@@ -1,30 +1,75 @@
-// use image::Rgba;
+#![warn(missing_docs)]
+
+
+//! # attractor crate
+//!
+//! Create and Plot Strange Attractors
+//! 
+//! Create and plot attractors, specifically an attractor described by Julian
+//! Sprott in his book "_Strange Attractors: Creating Patterns in Chaos_".
+//! <https://sprott.physics.wisc.edu/fractals/booktext/sabook.pdf>
+//! 
+//! The resulting attractor is discretized (binned) into matrix, making plotting fast.
+//! 
+
+
 use ndarray::prelude::*;
 // use ndarray::Array;
 // use ndarray_rand::RandomExt;
 // use ndarray_rand::rand_distr::Uniform;
 use ndarray::Array1;
 use inc_stats::Percentiles as Percentiles;
-// use colorgrad::{rainbow};
 use image::{RgbaImage, ImageBuffer};
 
-pub struct Xy {
-    // pub image: Array2<f32>,
+
+/// Holds attractor results.
+pub struct AttractorResult {
+    /// filename
     pub filename: String,
-    pub n: usize
+    /// number of points computed
+    pub n: usize,
+    /// does the attractor remain in finite bounds
+    pub finite: bool
 }
 
-// fn scale01(x:&f64, xmin:&f64, xmax:&f64) -> f64 {
-//     if xmin == xmax { return 0.5; }
-//     return (x - xmin) / (xmax - xmin);
-// }
+/// Attractor input configuration
+pub struct AttractorInput {
+    /// coefficient array
+    pub a: Array1<f64>,
+    /// number of iterations
+    pub n: usize,
+    /// starting x and y value,
+    pub filename: String,
+    /// initial values
+    pub xy: (f64, f64),
+    /// image size
+    pub img_size: (usize, usize),
+    /// percentile threshold to limit sampling points
+    pub perc_threshold: f64
+}
+
 
 fn remap(x:&f64, xmin:&f64, xmax:&f64, ymin:&f64, ymax:&f64) -> f64 {
     if xmin == xmax { return 0.5; }
     return ymin + (x - xmin) * (ymax - ymin) / (xmax - xmin);
 }
 
-fn sprott(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
+
+/// Generate strange attractor using equation 7E of Sprott.
+/// 
+/// This attractor is based on Equation 7E of Sprott (see references).
+///
+/// \deqn{x_{i+1} = a_{1} + a_{2} * x_{i} +  a_{3} * y_{i} +  a_{4} * |x_{i}|^{a5}  +  a6 * |y_{i}|^{a7}}
+///
+/// \deqn{y_{i+1} = a_{8} + a_{9} * x_{i} +  a_{10} * y_{i} +  a_{11} * |x_{i}|^{a12}  +  a13 * |y_{i}|^{a14}}
+///
+/// # references
+/// 
+/// Julien C. Sprott, "Strange Attractors: Creating Patterns in Chaos", page 418, Equation 7e, 
+/// <https://sprott.physics.wisc.edu/fractals/booktext/sabook.pdf>
+///
+
+fn sprott_7e(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
     let a1  = a[0];
     let a2  = a[1];
     let a3  = a[2];
@@ -46,6 +91,98 @@ fn sprott(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
     return (x1, y1)
 }
 
+
+/// 
+// pub fn attractor(a:&Array1<f64>, n:&usize, x0:f64, y0:f64, 
+    // img_size: (usize, usize), perc_threshold: f64) -> AttractorResult { 
+pub fn attractor(config: &AttractorInput) -> AttractorResult { 
+    let a = &config.a;
+    let n = config.n;
+    let img_size = config.img_size;
+    let perc_threshold = config.perc_threshold;
+    let (x0, y0) = config.xy;
+
+    let mut xy:Vec<(f64, f64)> = Vec::with_capacity(n);
+
+    xy.push((x0, y0));
+
+    let mut x1: f64 = x0;
+    let mut y1: f64 = y0;
+
+    let mut nn: usize = n;
+    
+    // compute a burn-in of 1000 samples and discard
+    let mut finite = true;
+    for _i in 1..1000 {
+        (x1, y1) = sprott_7e(&a, &x1, &y1);
+        if x1.is_infinite() || y1.is_infinite() {
+            nn = _i;
+            finite = false;
+            break;      
+        }
+    }
+
+    // compute nn new samples
+    let mut i:usize = 0;
+    while finite && i < n {
+        (x1, y1) = sprott_7e(&a, &x1, &y1);
+        if x1.is_infinite() || y1.is_infinite() {
+            nn = i;
+            finite = false;
+            break;      
+        }
+        xy.push((x1, y1));
+        i += 1;
+    }
+
+    // compute percentiles
+    let xrange: Vec<f64>;
+    let yrange: Vec<f64>;
+    (xrange, yrange) = compute_percentiles(&xy, &perc_threshold);
+
+    // discretize into image
+    let mut image: Array2<i32> = Array2::zeros(img_size);
+    if finite {
+        nn = n;
+        image = discretize_image(&xy, img_size, xrange, yrange, image);
+    }
+
+    // convert array to image with colour gradient
+    let imgbuf:RgbaImage = convert_to_image(image);
+
+    // save png image
+    save_attractor(imgbuf, &config.filename);
+    
+    let filename = config.filename.to_string();
+    return AttractorResult {filename: filename, n:nn, finite: finite};
+ }
+
+
+fn convert_to_image(image: Array2<i32>) -> RgbaImage {
+    let shape = image.shape();
+    let imgx: u32 = shape[0] as u32;
+    let imgy: u32 = shape[1] as u32;
+    
+    let img_max = *image.iter().max().unwrap() as f32;
+    let raw_img:Array2<f32> = image.mapv(|x| ((x as f32 / img_max) * 1.0_f32.exp()).ln_1p());
+    raw_img.as_standard_layout();
+    
+    let grad = colorgrad::rainbow();
+    let mut imgbuf: RgbaImage = ImageBuffer::new(imgx, imgy);
+    
+    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
+        let t = raw_img[[x as usize, y as usize]] / 1.0_f32.exp().ln_1p();
+        let mut rgba = grad.at(t as f64).to_rgba8();
+        if t == 0.0 {rgba = [0,0,0,255]};
+        *pixel = image::Rgba(rgba);
+    }
+    return imgbuf;
+}
+
+fn save_attractor(imgbuf: RgbaImage, filename: &String) {
+    // let filename = String::from("attractor.png");
+    imgbuf.save(filename).unwrap();
+}
 
 fn compute_percentiles(xy: &Vec<(f64, f64)>, perc_threshold: &f64) -> (Vec<f64>, Vec<f64>) {
     // compute percentiles for xrange and yrange
@@ -80,90 +217,3 @@ fn discretize_image(xy: &Vec<(f64, f64)>, img_size: (usize, usize),
     return image;
 }
 
-
-/// 
-pub fn attractor(a:&Array1<f64>, n:&usize, x0:f64, y0:f64, 
-    img_size: (usize, usize), perc_threshold: f64) -> Xy { 
-
-    let mut xy:Vec<(f64, f64)> = Vec::with_capacity(*n);
-
-    xy.push((x0, y0));
-
-    let mut x1: f64 = x0;
-    let mut y1: f64 = y0;
-
-    let mut nn: usize = *n;
-    
-    // compute a burn-in of 1000 samples and discard
-    let mut finite = true;
-    for _i in 1..1000 {
-        (x1, y1) = sprott(&a, &x1, &y1);
-        if x1.is_infinite() || y1.is_infinite() {
-            nn = _i;
-            finite = false;
-            break;      
-        }
-    }
-
-    // compute nn new samples
-    let mut i:usize = 0;
-    while finite && i < *n {
-        (x1, y1) = sprott(&a, &x1, &y1);
-        if x1.is_infinite() || y1.is_infinite() {
-            nn = i;
-            finite = false;
-            break;      
-        }
-        xy.push((x1, y1));
-        i += 1;
-    }
-
-    // compute percentiles
-
-    let xrange: Vec<f64>;
-    let yrange: Vec<f64>;
-
-    (xrange, yrange) = compute_percentiles(&xy, &perc_threshold);
-
-    
-    // discretize into image
-    let mut image: Array2<i32> = Array2::zeros(img_size);
-    if finite {
-        nn = *n;
-        image = discretize_image(&xy, img_size, xrange, yrange, image);
-    }
-
-    let imgbuf:RgbaImage = convert_to_image(image);
-
-    let filename: String = save_attractor(imgbuf);
-    
-    return Xy {filename, n:nn};
- }
-
-
-fn convert_to_image(image: Array2<i32>) -> RgbaImage {
-    let shape = image.shape();
-    let imgx: u32 = shape[0] as u32;
-    let imgy: u32 = shape[1] as u32;
-    
-    let img_max = *image.iter().max().unwrap() as f32;
-    let raw_img:Array2<f32> = image.mapv(|x| ((x as f32 / img_max) * 1.0_f32.exp()).ln_1p());
-    raw_img.as_standard_layout();
-    
-    let grad = colorgrad::rainbow();
-    let mut imgbuf: RgbaImage = ImageBuffer::new(imgx, imgy);
-    
-    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-        let t = raw_img[[x as usize, y as usize]] / 1.0_f32.exp().ln_1p();
-        let mut rgba = grad.at(t as f64).to_rgba8();
-        if t == 0.0 {rgba = [0,0,0,255]};
-        *pixel = image::Rgba(rgba);
-    }
-    return imgbuf;
-}
-
-fn save_attractor(imgbuf: RgbaImage) -> String {
-    let filename = String::from("attractor.png");
-    imgbuf.save(&filename).unwrap();
-    return filename;
-}
