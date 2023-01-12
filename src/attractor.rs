@@ -1,6 +1,5 @@
 #![warn(missing_docs)]
 
-
 //! # attractor crate
 //!
 //! Create and Plot Strange Attractors
@@ -14,9 +13,6 @@
 
 
 use ndarray::prelude::*;
-// use ndarray::Array;
-// use ndarray_rand::RandomExt;
-// use ndarray_rand::rand_distr::Uniform;
 use ndarray::Array1;
 use inc_stats::Percentiles as Percentiles;
 use image::{RgbaImage, ImageBuffer};
@@ -47,7 +43,10 @@ pub struct AttractorInput {
     /// image size
     pub img_size: (usize, usize),
     /// percentile threshold to limit sampling points
-    pub perc_threshold: f64
+    pub perc_threshold: f64,
+    /// color gradient function
+    // pub gradient_fn: GradType<'a>
+    pub gradient_fn: fn() -> colorgrad::Gradient
 }
 
 
@@ -95,8 +94,6 @@ fn sprott_7e(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
 
 
 /// 
-// pub fn attractor(a:&Array1<f64>, n:&usize, x0:f64, y0:f64, 
-    // img_size: (usize, usize), perc_threshold: f64) -> AttractorResult { 
 pub fn attractor(config: &AttractorInput) -> AttractorResult { 
     let a = &config.a;
     let n = config.n;
@@ -168,7 +165,7 @@ pub fn attractor(config: &AttractorInput) -> AttractorResult {
 
     // convert array to image with colour gradient
     println!("Converting array to image...");
-    let imgbuf:RgbaImage = convert_to_image(image);
+    let imgbuf:RgbaImage = convert_to_image(image, &config.gradient_fn);
 
     // save png image
     println!("Saving image...");
@@ -204,47 +201,48 @@ fn discretize_image(image: &mut Array2<i32>, xy: &Vec<(f64, f64)>, img_size: (us
     }
 }
 
+
 /// Convert array to RgbaImage
-fn convert_to_image(image: Array2<i32>) -> RgbaImage {
+fn convert_to_image(image: Array2<i32>, gradient_fn: &dyn Fn() -> colorgrad::Gradient) -> RgbaImage {
+// fn convert_to_image(image: Array2<i32>, gradient_fn: GradType) -> RgbaImage {
     let shape = image.shape();
     let imgx: u32 = shape[0] as u32;
     let imgy: u32 = shape[1] as u32;
     
     println!("Computing max value...");
-    let img_max = *image.iter().max().unwrap() as f32;
+    let img_max = *image.iter().max().unwrap() as f64;
     println!("Rescaling values...");
-    let raw_img:Array2<f32> = image.mapv(|x| ((x as f32 / img_max) * 1.0_f32.exp()).ln_1p());
+    let raw_img:Array2<f64> = image.mapv(|x| ((x as f64 / img_max) * 1.0_f64.exp()).ln_1p());
     println!("Converting to standard layout...");
     let raw_img = raw_img.reversed_axes();
     
-    let grad = colorgrad::rainbow();
+    // let grad = colorgrad::rainbow();
     let mut imgbuf: RgbaImage = ImageBuffer::new(imgx, imgy);
     
     println!("Converting to rgba image...");
     
+    let (mut tmin, mut tmax) = (100.0, 0.0);
+    
     for (p, v) in imgbuf.pixels_mut()
-        .zip(raw_img.iter()) {
-            let t = (*v as f64) / 1.0_f64.exp().ln_1p();
-            let mut rgba = [0,0,0,255];
-            if t != 0.0 {
-                rgba = grad.at(t).to_rgba8();
-            }
-            *p = image::Rgba(rgba);
-        }
+    .zip(raw_img.iter()) {
+        let t = *v / 1.0_f64.exp().ln_1p();
+        let mut rgba = [0,0,0,255];
+        (tmin, tmax) = (t.min(tmin), t.max(tmax));
+        if t != 0.0 { rgba = gradient_fn().at(t).to_rgba8(); }
+        *p = image::Rgba(rgba);
+    }
+    println!("tmin: {}, tmax: {}", tmin, tmax);
         
     return imgbuf;
 }
 
 /// Save RgbaImage to png file
 fn save_attractor(imgbuf: RgbaImage, filename: &String) {
-    // let filename = String::from("attractor.png");
     imgbuf.save(filename).unwrap();
 }
 
 /// Given a vector and a threshold, compute percentile cutofss
 fn compute_percentiles(xy: &Vec<(f64, f64)>, perc_threshold: &f64) -> (Vec<f64>, Vec<f64>) {
-    // compute percentiles for xrange and yrange
-
     let mut xperc = Percentiles::new();
     let mut yperc = Percentiles::new();
     for elem in xy {
