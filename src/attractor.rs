@@ -216,7 +216,6 @@ fn convert_to_image(image: Array2<i32>, gradient_fn: &dyn Fn() -> colorgrad::Gra
     println!("Converting to standard layout...");
     let raw_img = raw_img.reversed_axes();
     
-    // let grad = colorgrad::rainbow();
     let mut imgbuf: RgbaImage = ImageBuffer::new(imgx, imgy);
     
     println!("Converting to rgba image...");
@@ -225,13 +224,14 @@ fn convert_to_image(image: Array2<i32>, gradient_fn: &dyn Fn() -> colorgrad::Gra
     
     for (p, v) in imgbuf.pixels_mut()
     .zip(raw_img.iter()) {
-        let t = *v / 1.0_f64.exp().ln_1p();
         let mut rgba = [0,0,0,255];
-        (tmin, tmax) = (t.min(tmin), t.max(tmax));
-        if t != 0.0 { rgba = gradient_fn().at(t).to_rgba8(); }
+        if  *v != 0.0 {
+            let t = *v / 1.0_f64.exp().ln_1p();
+            (tmin, tmax) = (t.min(tmin), t.max(tmax));
+            rgba = gradient_fn().at(t).to_rgba8();
+        }
         *p = image::Rgba(rgba);
     }
-    println!("tmin: {}, tmax: {}", tmin, tmax);
         
     return imgbuf;
 }
