@@ -5,7 +5,7 @@ use ndarray::array;
 // extern crate raster;
 
 pub mod attractor;
-use crate::attractor::{AttractorResult, AttractorInput};
+use crate::attractor::{AttractorResult, Attractor};
 
 
 
@@ -30,8 +30,8 @@ fn main() {
     // set scaling parameter - higher means larger image with more iterations
     let scale:i32 = 1;
 
-    // define the config
-    let config = AttractorInput {
+    // define the attractor configuration
+    let sprott = Attractor {
         a,
         n: 4_000_000 * scale.pow(2) as usize,
         filename: String::from("attractor.png"),
@@ -42,7 +42,7 @@ fn main() {
         // gradient_fn: colorgrad::reds
         // gradient_fn: g
     };
-    let xy:AttractorResult = attractor::attractor(&config);
+    let xy:AttractorResult = sprott.compute();
 
     let nn: usize = xy.n;
     if xy.finite {

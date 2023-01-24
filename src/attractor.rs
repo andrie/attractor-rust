@@ -31,7 +31,7 @@ pub struct AttractorResult {
 
 /// Attractor input configuration
 /// 
-pub struct AttractorInput {
+pub struct Attractor {
     /// coefficient array
     pub a: Array1<f64>,
     /// number of iterations
@@ -94,85 +94,88 @@ fn sprott_7e(a:&Array1<f64>, &x:&f64, &y:&f64) -> (f64, f64) {
 
 
 /// 
-pub fn attractor(config: &AttractorInput) -> AttractorResult { 
-    let a = &config.a;
-    let n = config.n;
-    let img_size = config.img_size;
-    let perc_threshold = config.perc_threshold;
-    let (x0, y0) = config.xy;
+impl Attractor {
+    /// Computes the attractor
+    pub fn compute(&self) -> AttractorResult { 
+        let a = &self.a;
+        let n = self.n;
+        let img_size = self.img_size;
+        let perc_threshold = &self.perc_threshold;
+        let (x0, y0) = self.xy;
 
-    let mut xy:Vec<(f64, f64)> = Vec::with_capacity(n);
+        let mut xy:Vec<(f64, f64)> = Vec::with_capacity(n);
 
-    xy.push((x0, y0));
+        xy.push((x0, y0));
 
-    let mut x1: f64 = x0;
-    let mut y1: f64 = y0;
+        let mut x1: f64 = x0;
+        let mut y1: f64 = y0;
 
-    let mut nn: usize = n;
-    
-    // compute a burn-in of 1000 samples and discard
-    let mut finite = true;
-    for i in 1..1000 {
-        (x1, y1) = sprott_7e(&a, &x1, &y1);
-        if x1.is_infinite() || y1.is_infinite() {
-            nn = i;
-            finite = false;
-            break;      
+        let mut nn: usize = n;
+        
+        // compute a burn-in of 1000 samples and discard
+        let mut finite = true;
+        for i in 1..1000 {
+            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            if x1.is_infinite() || y1.is_infinite() {
+                nn = i;
+                finite = false;
+                break;      
+            }
         }
-    }
 
-    if !finite {
-        return AttractorResult{filename: String::from(""), n: nn, finite: false};
-    }
-
-    // compute nn new samples
-    let progress_bar = ProgressBar::new((n / 100_000) as u64);
-    for i in 1..1_000_000 {
-        if i % 100_000 == 0 { progress_bar.inc(1); }
-        (x1, y1) = sprott_7e(&a, &x1, &y1);
-        if x1.is_infinite() || y1.is_infinite() {
-            finite = false;
-            nn = i;
-            break;      
+        if !finite {
+            return AttractorResult{filename: String::from(""), n: nn, finite: false};
         }
-        xy.push((x1, y1));
+
+        // compute nn new samples
+        let progress_bar = ProgressBar::new((n / 100_000) as u64);
+        for i in 1..1_000_000 {
+            if i % 100_000 == 0 { progress_bar.inc(1); }
+            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            if x1.is_infinite() || y1.is_infinite() {
+                finite = false;
+                nn = i;
+                break;      
+            }
+            xy.push((x1, y1));
+        }
+
+        if !finite {
+            return AttractorResult{filename: String::from(""), n: nn, finite: false};
+        }
+
+        // compute percentiles
+        let xrange: Vec<f64>;
+        let yrange: Vec<f64>;
+        (xrange, yrange) = compute_percentiles(&xy, &perc_threshold);
+
+        // discretize into image
+        let mut image: Array2<i32> = Array2::zeros(img_size);
+        discretize_image(&mut image, &xy, img_size, &xrange, &yrange);
+
+        let (mut xsize, mut ysize) = img_size; 
+        xsize -= 1;
+        ysize -= 1;
+
+        for _i in 1_000_000..n {
+            if _i % 100_000 == 0 { progress_bar.inc(1); }
+            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            remap_element(&mut image, &(x1, y1), &xrange[0], &xrange[1], 
+                &yrange[0], &yrange[1], &xsize, &ysize)
+        }
+        progress_bar.finish();
+
+        // convert array to image with colour gradient
+        println!("Converting array to image...");
+        let imgbuf:RgbaImage = convert_to_image(image, &self.gradient_fn);
+
+        // save png image
+        println!("Saving image...");
+        save_attractor(imgbuf, &self.filename);
+        
+        let filename = self.filename.to_string();
+        return AttractorResult {filename: filename, n:nn, finite: finite};
     }
-
-    if !finite {
-        return AttractorResult{filename: String::from(""), n: nn, finite: false};
-    }
-
-    // compute percentiles
-    let xrange: Vec<f64>;
-    let yrange: Vec<f64>;
-    (xrange, yrange) = compute_percentiles(&xy, &perc_threshold);
-
-    // discretize into image
-    let mut image: Array2<i32> = Array2::zeros(img_size);
-    discretize_image(&mut image, &xy, img_size, &xrange, &yrange);
-
-    let (mut xsize, mut ysize) = img_size; 
-    xsize -= 1;
-    ysize -= 1;
-
-    for _i in 1_000_000..n {
-        if _i % 100_000 == 0 { progress_bar.inc(1); }
-        (x1, y1) = sprott_7e(&a, &x1, &y1);
-        remap_element(&mut image, &(x1, y1), &xrange[0], &xrange[1], 
-            &yrange[0], &yrange[1], &xsize, &ysize)
-    }
-    progress_bar.finish();
-
-    // convert array to image with colour gradient
-    println!("Converting array to image...");
-    let imgbuf:RgbaImage = convert_to_image(image, &config.gradient_fn);
-
-    // save png image
-    println!("Saving image...");
-    save_attractor(imgbuf, &config.filename);
-    
-    let filename = config.filename.to_string();
-    return AttractorResult {filename: filename, n:nn, finite: finite};
 }
 
 
