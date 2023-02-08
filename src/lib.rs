@@ -50,13 +50,20 @@ pub struct Attractor {
     pub gradient_fn: fn() -> colorgrad::Gradient,
 }
 
-/// Scales (interpolates) value and maps onto a different output range
 ///
-fn remap(x: &f64, xmin: &f64, xmax: &f64, ymin: &f64, ymax: &f64) -> f64 {
-    if xmin == xmax {
+// fn remap(x: &f64, xmin: &f64, xmax: &f64, ymin: &f64, ymax: &f64) -> f64 {
+//     if xmin == xmax {
+//         return 0.5;
+//     }
+//     ymin + (x - xmin) * (ymax - ymin) / (xmax - xmin)
+// }
+
+/// Scales (interpolates) value and maps onto a different output range
+fn remap(x: &f64, from: (f64, f64), to: (f64, f64)) -> f64 {
+    if from.0 == from.1 {
         return 0.5;
     }
-    return ymin + (x - xmin) * (ymax - ymin) / (xmax - xmin);
+    to.0 + (x - from.0) * (to.1 - to.0) / (from.1 - from.0)
 }
 
 /// Generate strange attractor using equation 7E of Sprott.
@@ -91,13 +98,12 @@ fn sprott_7e(a: &Array1<f64>, &x: &f64, &y: &f64) -> (f64, f64) {
     let x1: f64 = a1 + a2 * x + a3 * y + a4 * (x.abs().powf(a5)) + a6 * ((y.abs()).powf(a7));
     let y1: f64 = a8 + a9 * x + a10 * y + a11 * (x.abs().powf(a12)) + a13 * ((y.abs()).powf(a14));
 
-    return (x1, y1);
+    (x1, y1)
 }
 
-///
-impl Attractor {
+impl Default for Attractor {
     /// Create a new attractor with default values
-    pub fn default() -> Attractor {
+    fn default() -> Attractor {
         let sprott_default_seed: Array1<f64> = array!(
             -0.589143526796629,
             0.674281478192589,
@@ -124,6 +130,11 @@ impl Attractor {
             gradient_fn: colorgrad::viridis,
         }
     }
+}
+
+///
+impl Attractor {
+    /// Create a new attractor with default values
     /// Computes the attractor
     pub fn compute(&self) -> AttractorResult {
         let a = &self.a;
@@ -144,7 +155,7 @@ impl Attractor {
         // compute a burn-in of 1000 samples and discard
         let mut finite = true;
         for i in 1..1000 {
-            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            (x1, y1) = sprott_7e(a, &x1, &y1);
             if x1.is_infinite() || y1.is_infinite() {
                 nn = i;
                 finite = false;
@@ -166,7 +177,7 @@ impl Attractor {
             if i % 100_000 == 0 {
                 progress_bar.inc(1);
             }
-            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            (x1, y1) = sprott_7e(a, &x1, &y1);
             if x1.is_infinite() || y1.is_infinite() {
                 finite = false;
                 nn = i;
@@ -186,7 +197,7 @@ impl Attractor {
         // compute percentiles
         let xrange: Vec<f64>;
         let yrange: Vec<f64>;
-        (xrange, yrange) = compute_percentiles(&xy, &perc_threshold);
+        (xrange, yrange) = compute_percentiles(&xy, perc_threshold);
 
         // discretize into image
         let mut image: Array2<i32> = Array2::zeros(img_size);
@@ -200,14 +211,12 @@ impl Attractor {
             if _i % 100_000 == 0 {
                 progress_bar.inc(1);
             }
-            (x1, y1) = sprott_7e(&a, &x1, &y1);
+            (x1, y1) = sprott_7e(a, &x1, &y1);
             remap_element(
                 &mut image,
                 &(x1, y1),
-                &xrange[0],
-                &xrange[1],
-                &yrange[0],
-                &yrange[1],
+                (xrange[0], xrange[1]),
+                (yrange[0], yrange[1]),
                 &xsize,
                 &ysize,
             )
@@ -223,11 +232,11 @@ impl Attractor {
         save_attractor(imgbuf, &self.filename);
 
         let filename = self.filename.to_string();
-        return AttractorResult {
-            filename: filename,
+        AttractorResult {
+            filename,
             n: nn,
-            finite: finite,
-        };
+            finite,
+        }
     }
 }
 
@@ -235,16 +244,14 @@ impl Attractor {
 fn remap_element(
     image: &mut Array2<i32>,
     elem: &(f64, f64),
-    xmin: &f64,
-    xmax: &f64,
-    ymin: &f64,
-    ymax: &f64,
+    from: (f64, f64),
+    _to: (f64, f64),
     xsize: &usize,
-    ysize: &usize,
+    ysize: &usize
 ) {
     let (x, y) = elem;
-    let xx: isize = remap(&x, &xmin, &xmax, &0.0, &(*xsize as f64)) as isize;
-    let yy: isize = remap(&y, &ymin, &ymax, &0.0, &(*ysize as f64)) as isize;
+    let xx: isize = remap(x, from, (0.0, (*xsize as f64))) as isize;
+    let yy: isize = remap(y, from, (0.0, (*ysize as f64))) as isize;
     if xx >= 0 && yy >= 0 && xx <= *xsize as isize && yy <= *ysize as isize {
         image[[xx as usize, yy as usize]] += 1;
     }
@@ -255,15 +262,15 @@ fn discretize_image(
     image: &mut Array2<i32>,
     xy: &Vec<(f64, f64)>,
     img_size: (usize, usize),
-    xrange: &Vec<f64>,
-    yrange: &Vec<f64>,
+    xrange: &[f64],
+    yrange: &[f64],
 ) {
     let (mut xsize, mut ysize) = img_size;
     xsize -= 1;
     ysize -= 1;
     for elem in xy {
         remap_element(
-            image, &elem, &xrange[0], &xrange[1], &yrange[0], &yrange[1], &xsize, &ysize,
+            image, elem, (xrange[0], xrange[1]), (yrange[0], yrange[1]), &xsize, &ysize,
         );
     }
 }
@@ -301,7 +308,7 @@ fn convert_to_image(
         *p = image::Rgba(rgba);
     }
 
-    return imgbuf;
+    imgbuf
 }
 
 /// Save RgbaImage to png file
@@ -322,7 +329,7 @@ fn compute_percentiles(xy: &Vec<(f64, f64)>, perc_threshold: &f64) -> (Vec<f64>,
         (1.0 - perc_threshold) / 2.0,
         perc_threshold + (1.0 - perc_threshold) / 2.0,
     ];
-    let xrange = xperc.percentiles(&percs).unwrap().unwrap();
-    let yrange = yperc.percentiles(&percs).unwrap().unwrap();
-    return (xrange, yrange);
+    let xrange = xperc.percentiles(percs).unwrap().unwrap();
+    let yrange = yperc.percentiles(percs).unwrap().unwrap();
+    (xrange, yrange)
 }

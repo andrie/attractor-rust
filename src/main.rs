@@ -10,13 +10,13 @@ use colorgrad::Color;
 
 #[allow(dead_code)]
 fn g() -> colorgrad::Gradient {
-    return colorgrad::CustomGradient::new()
+    colorgrad::CustomGradient::new()
         .colors(&[
             Color::from_rgba8(255, 0, 0, 255),
             Color::from_rgba8(255, 255, 255, 255),
         ])
         .build()
-        .unwrap();
+        .unwrap()
 }
 
 fn main() {
@@ -40,8 +40,8 @@ fn main() {
     //     // gradient_fn: g
     // };
 
-    let mut sprott = Attractor::default();
-    sprott.n = 1_000_000;
+    let sprott = Attractor{n: 1_000_000, ..Default::default()};
+    // sprott.n = 1_000_000;
     println!("Computing attractor with {} iterations", sprott.n);
 
     let xy: AttractorResult = sprott.compute();
