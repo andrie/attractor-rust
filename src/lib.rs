@@ -247,7 +247,7 @@ fn remap_element(
     from: (f64, f64),
     _to: (f64, f64),
     xsize: &usize,
-    ysize: &usize
+    ysize: &usize,
 ) {
     let (x, y) = elem;
     let xx: isize = remap(x, from, (0.0, (*xsize as f64))) as isize;
@@ -270,7 +270,12 @@ fn discretize_image(
     ysize -= 1;
     for elem in xy {
         remap_element(
-            image, elem, (xrange[0], xrange[1]), (yrange[0], yrange[1]), &xsize, &ysize,
+            image,
+            elem,
+            (xrange[0], xrange[1]),
+            (yrange[0], yrange[1]),
+            &xsize,
+            &ysize,
         );
     }
 }

@@ -40,7 +40,10 @@ fn main() {
     //     // gradient_fn: g
     // };
 
-    let sprott = Attractor{n: 1_000_000, ..Default::default()};
+    let sprott = Attractor {
+        n: 1_000_000,
+        ..Default::default()
+    };
     // sprott.n = 1_000_000;
     println!("Computing attractor with {} iterations", sprott.n);
 
